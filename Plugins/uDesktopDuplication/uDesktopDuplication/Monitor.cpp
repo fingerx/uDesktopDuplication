@@ -21,7 +21,6 @@ Monitor::Monitor(int id)
 
 Monitor::~Monitor()
 {
-    duplicator_->Stop();
 }
 
 
@@ -30,6 +29,8 @@ void Monitor::Initialize(
     const ComPtr<IDXGIOutput> &output
 )
 {
+    UDD_FUNCTION_SCOPE_TIMER
+
     adapter_ = adapter;
     output_ = output;
 
@@ -58,49 +59,80 @@ void Monitor::Initialize(
 		// DPI is set as -1, so the application has to use the appropriate value.
 	}
 
+    const auto rot = outputDesc_.Rotation;
+    Debug::Log("Monitor::Initialized() =>");
+    Debug::Log("    ID    : ", id_);
+    Debug::Log("    Size  : (", width_, ", ", height_, ")");
+    Debug::Log("    DPI   : (", dpiX_, ", ", dpiY_, ")");
+    Debug::Log("    Rot   : ",
+        rot == DXGI_MODE_ROTATION_IDENTITY ? "Landscape" :
+        rot == DXGI_MODE_ROTATION_ROTATE90 ? "Portrait" :
+        rot == DXGI_MODE_ROTATION_ROTATE180 ? "Landscape (flipped)" :
+        rot == DXGI_MODE_ROTATION_ROTATE270 ? "Portrait (flipped)" :
+        "Unspecified");
+
     duplicator_ = std::make_shared<Duplicator>(this);
 }
 
 
 void Monitor::Finalize()
 {
+    UDD_FUNCTION_SCOPE_TIMER
+
     StopCapture();
 }
 
 
 void Monitor::Render()
 {
+    UDD_FUNCTION_SCOPE_TIMER
+
     const auto& frame = duplicator_->GetLastFrame();
 
     if (frame.id == lastFrameId_) return;
     lastFrameId_ = frame.id;
 
-	if (unityTexture_)
-	{
-		D3D11_TEXTURE2D_DESC srcDesc, dstDesc;
-		frame.texture->GetDesc(&srcDesc);
-		unityTexture_->GetDesc(&dstDesc);
-		if (srcDesc.Width  != dstDesc.Width ||
-			srcDesc.Height != dstDesc.Height)
-		{
-			Debug::Error("Monitor::Render() => Texture sizes are defferent.");
-			Debug::Error("    Source : (", srcDesc.Width, ", ", srcDesc.Height, ")");
-			Debug::Error("    Dest   : (", dstDesc.Width, ", ", dstDesc.Height, ")");
-            return;
-		}
-		else
-		{
-			ComPtr<ID3D11DeviceContext> context;
-			GetDevice()->GetImmediateContext(&context);
-			context->CopyResource(unityTexture_, frame.texture.Get());
+    if (unityTexture_ == nullptr) 
+    {
+        Debug::Error("Monitor::Render() => Target texture has not been set yet.");
+        return;
+    }
 
-            auto& manager = GetMonitorManager();
-            if (id_ == manager->GetCursorMonitorId())
+    if (!frame.texture)
+    {
+        Debug::Error("Monitor::Render() => frame doesn't have texture.");
+        return;
+    }
+
+    D3D11_TEXTURE2D_DESC srcDesc, dstDesc;
+    frame.texture->GetDesc(&srcDesc);
+    unityTexture_->GetDesc(&dstDesc);
+    if (srcDesc.Width  != dstDesc.Width ||
+        srcDesc.Height != dstDesc.Height)
+    {
+        Debug::Error("Monitor::Render() => Texture sizes are defferent.");
+        Debug::Error("    Source : (", srcDesc.Width, ", ", srcDesc.Height, ")");
+        Debug::Error("    Dest   : (", dstDesc.Width, ", ", dstDesc.Height, ")");
+        return;
+    }
+    else
+    {
+        ComPtr<ID3D11DeviceContext> context;
+        GetDevice()->GetImmediateContext(&context);
+        context->CopyResource(unityTexture_, frame.texture.Get());
+
+        auto& manager = GetMonitorManager();
+        if (id_ == manager->GetCursorMonitorId())
+        {
+            if (auto cursor = manager->GetCursor())
             {
-                manager->GetCursor()->Draw(unityTexture_);
+                if (cursor->IsVisible())
+                {
+                    cursor->Draw(unityTexture_);
+                }
             }
-		}
-	}
+        }
+    }
 
 	if (UseGetPixels())
 	{
@@ -113,6 +145,8 @@ void Monitor::Render()
 
 void Monitor::StartCapture()
 {
+    UDD_FUNCTION_SCOPE_TIMER
+
     if (duplicator_->GetState() == DuplicatorState::Ready)
     {
         duplicator_->Start();
@@ -122,6 +156,8 @@ void Monitor::StartCapture()
 
 void Monitor::StopCapture()
 {
+    UDD_FUNCTION_SCOPE_TIMER
+
     duplicator_->Stop();
 }
 
@@ -282,6 +318,8 @@ bool Monitor::UseGetPixels() const
 
 void Monitor::CopyTextureFromGpuToCpu(ID3D11Texture2D* texture)
 {
+    UDD_FUNCTION_SCOPE_TIMER
+
     const auto monitorRot = static_cast<DXGI_MODE_ROTATION>(GetRotation());
     const auto monitorWidth = GetWidth();
     const auto monitorHeight = GetHeight();
@@ -347,6 +385,8 @@ void Monitor::CopyTextureFromGpuToCpu(ID3D11Texture2D* texture)
 
 bool Monitor::GetPixels(BYTE* output, int x, int y, int width, int height)
 {
+    UDD_FUNCTION_SCOPE_TIMER
+
     if (!UseGetPixels())
     {
         Debug::Error("Monitor::GetPixels() => UseGetPixels(true) must have been called when you want to use GetPixels().");
@@ -377,24 +417,24 @@ bool Monitor::GetPixels(BYTE* output, int x, int y, int width, int height)
         {
             left   = y;
             top    = monitorWidth - x - width;
-            right  = y + width;
-            bottom = monitorWidth - x;
+            right  = y + width - 1;
+            bottom = monitorWidth - x - 1;
             break;
         }
         case DXGI_MODE_ROTATION_ROTATE180:
         {
             left   = monitorWidth - x - width;
             top    = monitorHeight - y - height;
-            right  = monitorWidth - x;
-            bottom = monitorHeight - y;
+            right  = monitorWidth - x - 1;
+            bottom = monitorHeight - y - 1;
             break;
         }
         case DXGI_MODE_ROTATION_ROTATE270:
         {
             left   = monitorHeight - y - height;
             top    = x;
-            right  = monitorHeight - y;
-            bottom = x + width;
+            right  = monitorHeight - y - 1;
+            bottom = x + width - 1;
             break;
         }
         case DXGI_MODE_ROTATION_IDENTITY:
@@ -403,8 +443,8 @@ bool Monitor::GetPixels(BYTE* output, int x, int y, int width, int height)
         {
             left   = x;
             top    = y;
-            right  = x + width;
-            bottom = y + height;
+            right  = x + width - 1;
+            bottom = y + height - 1;
             break;
         }
     }
@@ -455,7 +495,6 @@ bool Monitor::GetPixels(BYTE* output, int x, int y, int width, int height)
             const auto outCol = col;
             const auto outIndex = 4 * (outRow * width + outCol);
 
-
             // BGRA -> RGBA
             output[outIndex + 0] = bufferForGetPixels_[inIndex + 2];
             output[outIndex + 1] = bufferForGetPixels_[inIndex + 1];
@@ -465,4 +504,15 @@ bool Monitor::GetPixels(BYTE* output, int x, int y, int width, int height)
     }
 
     return true;
+}
+
+
+BYTE* Monitor::GetBuffer() const
+{
+    if (!bufferForGetPixels_)
+    {
+        Debug::Error("Monitor::GetBuffer() => CopyTextureFromGpuToCpu() has not been called yet.");
+        return nullptr;
+    }
+    return bufferForGetPixels_.Get();
 }

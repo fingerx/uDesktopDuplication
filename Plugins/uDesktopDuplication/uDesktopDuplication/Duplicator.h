@@ -68,6 +68,7 @@ private:
     void CheckUnityAdapter();
 
     void Duplicate(UINT timeout);
+    void Release();
 
     void UpdateCursor(
         const Microsoft::WRL::ComPtr<ID3D11Texture2D>& texture,
@@ -76,13 +77,14 @@ private:
     void UpdateMoveRects();
     void UpdateDirtyRects();
 
-    Monitor* monitor_ = nullptr;
+    Monitor* const monitor_ = nullptr;
     std::atomic<State> state_ = State::Ready;
 
     std::shared_ptr<class IsolatedD3D11Device> device_;
     Microsoft::WRL::ComPtr<IDXGIOutputDuplication> dupl_;
     Frame lastFrame_;
     UINT lastFrameId_ = 0;
+    bool isFrameAcquired_ = false;
 
     volatile bool shouldRun_ = false;
     std::thread thread_;

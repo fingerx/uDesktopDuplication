@@ -23,7 +23,6 @@
 IUnityInterfaces* g_unity = nullptr;
 std::unique_ptr<MonitorManager> g_manager;
 std::queue<Message> g_messages;
-ID3D11DeviceContext* g_deviceContextForMainThread = nullptr;
 
 
 extern "C"
@@ -35,38 +34,24 @@ extern "C"
 
     UNITY_INTERFACE_EXPORT void UNITY_INTERFACE_API Initialize()
     {
-        if (g_unity && !g_manager)
+        if (!g_unity) return;
+
+        if (!g_manager)
         {
             Debug::Initialize();
-
-			auto device = g_unity->Get<IUnityGraphicsD3D11>()->GetDevice();
-
-			Microsoft::WRL::ComPtr<IDXGIDevice1> dxgiDevice;
-			if (FAILED(device->QueryInterface(IID_PPV_ARGS(&dxgiDevice)))){
-				Debug::Error("fatal");
-				return;
-			}
-
-			Microsoft::WRL::ComPtr<IDXGIAdapter> dxgiAdapter;
-			if (FAILED(dxgiDevice->GetAdapter(&dxgiAdapter))) {
-				Debug::Error("fatal");
-				return;
-			}
-
-			DXGI_ADAPTER_DESC desc;
-			dxgiAdapter->GetDesc(&desc);
-
-            g_manager = std::make_unique<MonitorManager>(desc.AdapterLuid);
+            OutputWindowsInformation();
+            g_manager = std::make_unique<MonitorManager>();
             g_manager->Initialize();
         }
     }
 
     UNITY_INTERFACE_EXPORT void UNITY_INTERFACE_API Finalize()
     {
-        if (!g_manager) return;
-
-        g_manager->Finalize();
-        g_manager.reset();
+        if (g_manager)
+        {
+            g_manager->Finalize();
+            g_manager.reset();
+        }
 
         std::queue<Message> empty;
         g_messages.swap(empty);
@@ -355,6 +340,18 @@ extern "C"
         return g_manager->GetCursor()->GetType();
     }
 
+    UNITY_INTERFACE_EXPORT int UNITY_INTERFACE_API GetCursorHotSpotX()
+    {
+        if (!g_manager) return -1;
+        return g_manager->GetCursor()->GetHotSpotX();
+    }
+
+    UNITY_INTERFACE_EXPORT int UNITY_INTERFACE_API GetCursorHotSpotY()
+    {
+        if (!g_manager) return -1;
+        return g_manager->GetCursor()->GetHotSpotY();
+    }
+
     UNITY_INTERFACE_EXPORT void UNITY_INTERFACE_API GetCursorTexture(ID3D11Texture2D* texture)
     {
         if (!g_manager) return;
@@ -381,7 +378,7 @@ extern "C"
         return 0;
     }
 
-    UNITY_INTERFACE_EXPORT void* UNITY_INTERFACE_API GetMoveRects(int id)
+    UNITY_INTERFACE_EXPORT DXGI_OUTDUPL_MOVE_RECT* UNITY_INTERFACE_API GetMoveRects(int id)
     {
         if (!g_manager) return nullptr;
         if (auto monitor = g_manager->GetMonitor(id))
@@ -401,7 +398,7 @@ extern "C"
         return 0;
     }
 
-    UNITY_INTERFACE_EXPORT void* UNITY_INTERFACE_API GetDirtyRects(int id)
+    UNITY_INTERFACE_EXPORT RECT* UNITY_INTERFACE_API GetDirtyRects(int id)
     {
         if (!g_manager) return nullptr;
         if (auto monitor = g_manager->GetMonitor(id))
@@ -413,12 +410,22 @@ extern "C"
 
     UNITY_INTERFACE_EXPORT bool UNITY_INTERFACE_API GetPixels(int id, BYTE* output, int x, int y, int width, int height)
     {
-        if (!g_manager) return nullptr;
+        if (!g_manager) return false;
         if (auto monitor = g_manager->GetMonitor(id))
         {
             return monitor->GetPixels(output, x, y, width, height);
         }
         return false;
+    }
+
+    UNITY_INTERFACE_EXPORT BYTE* UNITY_INTERFACE_API GetBuffer(int id)
+    {
+        if (!g_manager) return nullptr;
+        if (auto monitor = g_manager->GetMonitor(id))
+        {
+            return monitor->GetBuffer();
+        }
+        return nullptr;
     }
 
     UNITY_INTERFACE_EXPORT bool UNITY_INTERFACE_API HasBeenUpdated(int id)
